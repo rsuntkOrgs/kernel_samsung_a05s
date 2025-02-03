@@ -345,6 +345,8 @@ struct sc8989x_chip {
 
 static bool vbus_on = false;
 
+static int sc8989_ic_flag;
+
 static const u32 sc8989x_iboost[] = {
     500, 750, 1200, 1400, 1650, 1875, 2150, 2450,
 };
@@ -3076,10 +3078,11 @@ static int sc8989x_charger_probe(struct i2c_client *client,
 
     if (!sc8989x_detect_device(sc)) {
         ret = -ENODEV;
+        sc8989_ic_flag = 1;
         pr_err("No found sc8989x_detect_device !\n");
         goto err_nodev;
     }
-
+    sc8989_ic_flag = 0;
     sc8989x_create_device_node(&(client->dev));
     sc->hvdcp_qc20_ws = wakeup_source_register(sc->dev, "sc89890h_hvdcp_qc20_ws");
     INIT_DELAYED_WORK(&sc->hvdcp_qc20_dwork, sc89890h_hvdcp_qc20_dwork);
@@ -3284,7 +3287,7 @@ err_nodev:
     dev_err(sc->dev, "sc8989x probe failed!\n");
     mutex_destroy(&sc->regulator_lock);
     devm_kfree(&client->dev, sc);
-    return -ENODEV;
+    return 0;
 }
 
 static int sc8989x_charger_remove(struct i2c_client *client) {
@@ -3305,6 +3308,9 @@ static int sc8989x_charger_remove(struct i2c_client *client) {
 static int sc8989x_suspend(struct device *dev) {
     struct sc8989x_chip *sc = dev_get_drvdata(dev);
 
+    if(sc8989_ic_flag)
+        return 0;
+
     dev_err(dev, "%s\n", __func__);
     if (device_may_wakeup(dev))
         enable_irq_wake(sc->irq);
@@ -3315,6 +3321,9 @@ static int sc8989x_suspend(struct device *dev) {
 
 static int sc8989x_resume(struct device *dev) {
     struct sc8989x_chip *sc = dev_get_drvdata(dev);
+
+    if(sc8989_ic_flag)
+        return 0;
 
     dev_err(dev, "%s\n", __func__);
     enable_irq(sc->irq);
@@ -3328,6 +3337,9 @@ static void sc8989x_charger_shutdown(struct i2c_client *client)
 {
 	struct sc8989x_chip *sc;
 	int ret;
+  
+  	if(sc8989_ic_flag)
+          return ;
 
 	sc = i2c_get_clientdata(client);
 	if(!sc) {

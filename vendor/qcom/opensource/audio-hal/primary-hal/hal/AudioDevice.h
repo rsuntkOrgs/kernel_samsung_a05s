@@ -191,6 +191,7 @@ public:
     bool vsid_realcalling;
     bool voip_wificalling;
 #endif
+    bool call_forwarding_state = false;
     pal_speaker_rotation_type current_rotation;
     static card_status_t sndCardState;
     std::mutex adev_init_mutex;

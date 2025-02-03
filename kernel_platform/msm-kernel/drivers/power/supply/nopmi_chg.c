@@ -40,11 +40,11 @@
 #define CYCLE_COUNT_STEP2 400
 #define CYCLE_COUNT_STEP3 700
 #define CYCLE_COUNT_STEP4 1000
-#define FLOAT_VOLTAGE_DEFAULT 4423
-#define FLOAT_VOLTAGE_STEP1   4350
-#define FLOAT_VOLTAGE_STEP2   4330
-#define FLOAT_VOLTAGE_STEP3   4310
-#define FLOAT_VOLTAGE_STEP4   4290
+#define FLOAT_VOLTAGE_DEFAULT 4350
+#define FLOAT_VOLTAGE_STEP1   4330
+#define FLOAT_VOLTAGE_STEP2   4310
+#define FLOAT_VOLTAGE_STEP3   4290
+#define FLOAT_VOLTAGE_STEP4   4240
 
 #define BATTERY_VENDOR_NVT   1
 #define BATTERY_VENDOR_SCUD  2
@@ -105,8 +105,8 @@ enum {
 	GAUGE_TYPE_CW,
 };
 
-#define START_CHARGE_SOC   83
-#define STOP_CHARGE_SOC   85
+#define START_CHARGE_SOC   78
+#define STOP_CHARGE_SOC   80
 #if 0
 #undef pr_debug
 #define pr_debug pr_err
@@ -162,6 +162,11 @@ extern bool g_ffc_disable;
 //extern int adapter_dev_get_pd_verified(void);
 
 extern int pd_pps_max_pw;
+extern int battery_cycle_count;
+extern int debug_battery_cycle_count;
+extern int FV_battery_cycle;
+extern int sm5602_cycle;
+extern int sm5602_CV;
 
 static const int NOPMI_CHG_WORKFUNC_GAP_NO_PLUGIN = 10000;
 static const int NOPMI_CHG_WORKFUNC_GAP = 5000;
@@ -1270,7 +1275,7 @@ static int nopmi_set_prop_input_suspend(struct nopmi_chg *nopmi_chg,
 		pr_err("%s : nopmi_chg->disable_pps_charge = %d\n", __func__, nopmi_chg->disable_pps_charge);
 	} else {
 		if ((nopmi_chg->batt_slate_mode == 1) || (nopmi_chg->batt_slate_mode == 2)
-			|| (soc_full == 1 && nopmi_chg->batt_full_capacity == STOP_CHARGE_SOC)
+			|| (soc_full == 1 && nopmi_chg->batt_full_capacity_soc == STOP_CHARGE_SOC)
 			|| ((nopmi_chg->batt_store_mode == 1) && nopmi_chg->is_store_mode_stop_charge)) {
 			pr_info("slate mode open  or charge protect open soc_full equal 1 input_suspend not close\n");
 			return -1;
@@ -1613,7 +1618,7 @@ static int nopmi_batt_set_prop(struct power_supply *psy,
 		if (val->intval < 5 || val->intval > nopmi_chg->thermal_levels) {
 			iscovert = false;
 		} else {
-			iscovert = true;
+			iscovert = false;
 		}
 		pval.intval = val->intval;
 		if (iscovert)
@@ -1978,7 +1983,7 @@ static ssize_t batt_full_capacity_show(struct device *dev,
 {
         struct nopmi_chg *chg = container_of(attr, struct nopmi_chg ,attr_batt_full_capacity);
 
-	return sprintf(buf, "%d\n",chg->batt_full_capacity);
+	return sprintf(buf, "%d %s\n",chg->batt_full_capacity_soc,chg->batt_full_capacity);
 }
 static ssize_t batt_full_capacity_store(struct device *dev,
            struct device_attribute *attr,
@@ -1986,15 +1991,44 @@ static ssize_t batt_full_capacity_store(struct device *dev,
 {
         int ret = 0;
         int val = 0;
+	char str[32] = "";
         struct nopmi_chg *chg = container_of(attr, struct nopmi_chg , attr_batt_full_capacity);
+        ret = sscanf(buf, "%3d %10s\n", &val, str);
+        if(ret < 0)
+                return -EINVAL;
+
+        strcpy(chg->batt_full_capacity, str);
+		chg->batt_full_capacity_soc = val;
+
+	schedule_delayed_work(&chg->batt_capacity_check_work, msecs_to_jiffies(0));
+	pr_err("open or close charge protect batt_full_capacity = %s\n", chg->batt_full_capacity);
+	pr_err("open or close charge protect batt_full_capacity_soc= %d\n", chg->batt_full_capacity_soc);
+        return count;
+}
+
+static ssize_t batt_soc_rechg_show(struct device *dev,
+          struct device_attribute *attr,
+          char *buf)
+{
+        struct nopmi_chg *chg = container_of(attr, struct nopmi_chg ,attr_batt_soc_rechg);
+
+	return sprintf(buf, "%d\n",chg->batt_soc_rechg);
+}
+
+static ssize_t batt_soc_rechg_store(struct device *dev,
+           struct device_attribute *attr,
+           const char *buf, size_t count)
+{
+        int ret = 0;
+        int val = 0;
+        struct nopmi_chg *chg = container_of(attr, struct nopmi_chg , attr_batt_soc_rechg);
         ret =  kstrtoint(buf, 10, &val);
         if(ret < 0)
                 return -EINVAL;
 
-        chg->batt_full_capacity = val;
+        chg->batt_soc_rechg = val;
 
-	schedule_delayed_work(&chg->batt_capacity_check_work, msecs_to_jiffies(0));
-	pr_err("open or close charge protect batt_full_capacity = %d\n", chg->batt_full_capacity);
+	pr_err("open or close charge protect batt_soc_rechg = %d\n", chg->batt_soc_rechg);
         return count;
 }
 
@@ -2004,6 +2038,17 @@ static ssize_t battery_cycle_show(struct device *dev,
 {
         struct nopmi_chg *chg = container_of(attr, struct nopmi_chg ,attr_battery_cycle);
 
+		
+        union power_supply_propval pval={0, };
+        int rc = 0;
+
+        if (chg->bms_psy) {
+                rc = power_supply_get_property(chg->bms_psy, POWER_SUPPLY_PROP_CYCLE_COUNT, &pval);
+                if (rc < 0) {
+                        pr_err("%s : get POWER_SUPPLY_PROP_CYCLE_COUNT fail\n", __func__);
+                        pval.intval = 0;
+                }
+	}	
 	return sprintf(buf, "%d\n",chg->battery_cycle);
 }
 
@@ -2142,7 +2187,8 @@ static ssize_t time_to_full_now_show(struct device *dev,
 		pr_err("%s : get POWER_SUPPLY_PROP_CHARGE_COUNTER fail\n", __func__);
 		return rc;
 	}
-	batt_rmc = pval.intval;
+	batt_rmc = pval.intval / 1000;
+	pr_err("batt_rmc = %d", batt_rmc);
 
 	rc = power_supply_get_property(chg->bms_psy, POWER_SUPPLY_PROP_CHARGE_FULL, &pval);
 	if (rc < 0) {
@@ -2171,10 +2217,10 @@ static ssize_t time_to_full_now_show(struct device *dev,
 		pr_err("%s : use cw221X gauge\n", __func__);
 	}
 
-	if (chg->batt_full_capacity == STOP_CHARGE_SOC) {
+	if (chg->batt_full_capacity_soc == STOP_CHARGE_SOC) {
 		batt_fcc = batt_fcc * STOP_CHARGE_SOC/100;
 	}
-	pr_err("%s : batt_fcc = %d batt_full_capacity=%d\n", __func__,batt_fcc,chg->batt_full_capacity);
+	pr_err("%s : batt_fcc = %d batt_full_capacity=%d\n", __func__,batt_fcc,chg->batt_full_capacity_soc);
 
 	rc = power_supply_get_property(chg->batt_psy,POWER_SUPPLY_PROP_STATUS, &pval);
 	if (rc < 0) {
@@ -2650,6 +2696,15 @@ static int nopmi_init_batt_psy(struct nopmi_chg *chg)
         if(rc)
                 return -EINVAL;
 
+	sysfs_attr_init(&chg->attr_batt_soc_rechg.attr);
+        chg->attr_batt_soc_rechg.attr.name = "batt_soc_rechg";
+        chg->attr_batt_soc_rechg.attr.mode = 0644;
+        chg->attr_batt_soc_rechg.show = batt_soc_rechg_show;
+        chg->attr_batt_soc_rechg.store = batt_soc_rechg_store;
+        rc = sysfs_create_file(&chg->batt_psy->dev.kobj,&chg->attr_batt_soc_rechg.attr);
+        if(rc)
+                return -EINVAL;
+
 	sysfs_attr_init(&chg->attr_battery_cycle.attr);
         chg->attr_battery_cycle.attr.name = "battery_cycle";
         chg->attr_battery_cycle.attr.mode = 0644;
@@ -2690,7 +2745,7 @@ static int nopmi_init_batt_psy(struct nopmi_chg *chg)
         chg->attr_batt_current_ua_now.attr.name = "batt_current_ua_now";
         chg->attr_batt_current_ua_now.attr.mode = 0644;
         chg->attr_batt_current_ua_now.show = batt_current_ua_now_show;
-        chg->attr_battery_cycle.store = batt_current_ua_now_store;
+        chg->attr_batt_current_ua_now.store = batt_current_ua_now_store;
         rc = sysfs_create_file(&chg->batt_psy->dev.kobj,&chg->attr_batt_current_ua_now.attr);
         if(rc)
                 return -EINVAL;
@@ -3653,6 +3708,7 @@ out:
 	pr_info("nopmi_cv_step_monitor_work: end");
 }
 
+
 static void  nopmi_fv_vote_monitor_work(struct work_struct *work)
 {
 	struct nopmi_chg *nopmi_chg = container_of(work,struct nopmi_chg, fv_vote_monitor_work.work);
@@ -3672,6 +3728,11 @@ static void  nopmi_fv_vote_monitor_work(struct work_struct *work)
   		pr_err("get POWER_SUPPLY_PROP_CYCLE_COUNT, fail !\n");
   		goto out;
   	}
+	debug_battery_cycle_count = nopmi_chg->battery_cycle;
+	pr_err("debug battery count %d\n",debug_battery_cycle_count);
+
+	battery_cycle_count = pval.intval;
+	pr_err("battery count %d\n",battery_cycle_count);
 
 	if(nopmi_chg->battery_cycle) {
 		if (nopmi_chg->battery_cycle >= CYCLE_COUNT_STEP4)
@@ -3699,8 +3760,10 @@ static void  nopmi_fv_vote_monitor_work(struct work_struct *work)
 			fv = FLOAT_VOLTAGE_DEFAULT;
 
 		pr_err("cyclt_count = %d, fv = %d\n", pval.intval, fv);
-	}
-
+	}  	
+  
+	sm5602_CV =fv;
+  
 	pd_active = nopmi_get_pd_active(nopmi_chg);
 
 	ret = nopmi_chg_get_iio_channel(nopmi_chg,
@@ -3732,6 +3795,8 @@ static void  nopmi_fv_vote_monitor_work(struct work_struct *work)
 	}
 
 	vote(nopmi_chg->fv_votable, CYCLE_COUNT_VOTER, true, fv);
+  	FV_battery_cycle = nopmi_chg->battery_cycle;
+	sm5602_cycle = nopmi_chg->battery_cycle;
 	pr_err("vote fv, charge status = %d, fv = %d\n", pval.intval, fv);
 out:
   	schedule_delayed_work(&nopmi_chg->fv_vote_monitor_work,
@@ -3771,6 +3836,71 @@ static void nopmi_thermal_check_work(struct work_struct *work)
 	schedule_delayed_work(&nopmi_chg->thermal_check_work, msecs_to_jiffies(NOPMI_CHG_THERMAL_CHECK_WORKFUNC_GAP));
 }
 
+static void nopmi_configure_recharging(struct nopmi_chg *nopmi_chg)
+{
+	union power_supply_propval pval = {0, };
+	int val = 0;
+	int ret = 0;
+	int cur = 0;
+	int online = 0;
+	int soc = 0;
+  	int rc = 0;
+	static int flag = 0;
+	static bool first_time = false;
+  
+	ret = power_supply_get_property(nopmi_chg->bms_psy, POWER_SUPPLY_PROP_CAPACITY, &pval);
+	if(ret < 0){
+        pr_err("Couldn't get soc\n");}  
+	soc = pval.intval;
+	ret = power_supply_get_property(nopmi_chg->bms_psy, POWER_SUPPLY_PROP_CURRENT_NOW, &pval);
+	if(ret < 0){
+        pr_err("Couldn't get cur\n");}  
+	cur = pval.intval;
+	online = nopmi_chg->usb_online;
+	val = nopmi_chg->batt_soc_rechg;
+
+
+	pr_err("configure_recharging val=%d, current=%d, onlion=%d,soc=%d", val,cur,online,soc);
+	if(val)
+	{
+		if(soc == 100 && cur < 0 && online) 
+			flag =1;
+		else if(soc < 96) {
+			flag =0;
+		}
+          	pr_err("configure_recharging flag=%d",flag);
+        	if(flag){
+			first_time = true;
+			pval.intval = 0;
+			rc = power_supply_set_property(nopmi_chg->usb_psy, POWER_SUPPLY_PROP_ONLINE, &pval);
+			rc = nopmi_set_prop_input_suspend(nopmi_chg, 1);
+			if (g_nopmi_chg != NULL) {
+			g_nopmi_chg->disable_quick_charge = true;
+			}
+			pr_err("configure_recharging_stop");
+        	}else if(!flag && first_time){
+			first_time = false;
+			pval.intval = 1;
+			rc = power_supply_set_property(nopmi_chg->usb_psy, POWER_SUPPLY_PROP_ONLINE, &pval);
+			rc = nopmi_set_prop_input_suspend(nopmi_chg, 0);
+			if (g_nopmi_chg != NULL) {
+			g_nopmi_chg->disable_quick_charge = false;
+			}
+			pr_err("configure_recharging_enable");
+			}
+	}else if(first_time)
+	{
+		first_time = false;
+		pval.intval = 1;
+		rc = power_supply_set_property(nopmi_chg->usb_psy, POWER_SUPPLY_PROP_ONLINE, &pval);
+		rc = nopmi_set_prop_input_suspend(nopmi_chg, 0);
+		if (g_nopmi_chg != NULL) {
+			g_nopmi_chg->disable_quick_charge = false;
+		}
+		pr_err("configure_recharging_enable");
+	}
+}
+
 static void nopmi_batt_capacity_check_work(struct work_struct *work)
 {
 	struct nopmi_chg *nopmi_chg = container_of(work,struct nopmi_chg, batt_capacity_check_work.work);
@@ -3781,7 +3911,9 @@ static void nopmi_batt_capacity_check_work(struct work_struct *work)
 	int vbus;
 	int rc = 0;
 	int soc = 0;
-	pr_err("batt_capacity_check_work: start batt_full_capacity = %d , batt_full_capacity_pre = %d\n", nopmi_chg->batt_full_capacity, batt_full_capacity_pre);
+	pr_err("batt_capacity_check_work: start batt_full_capacity = %d , batt_full_capacity_pre = %d\n", nopmi_chg->batt_full_capacity_soc, batt_full_capacity_pre);
+
+	nopmi_configure_recharging(nopmi_chg);
 
 	rc = nopmi_chg_get_iio_channel(nopmi_chg,NOPMI_CP, CHARGE_PUMP_SP_BUS_VOLTAGE, &vbus);
 	if (rc < 0) {
@@ -3834,7 +3966,7 @@ static void nopmi_batt_capacity_check_work(struct work_struct *work)
 		return;
 	}
 
-	if(nopmi_chg->batt_full_capacity == STOP_CHARGE_SOC) {
+	if(nopmi_chg->batt_full_capacity_soc == STOP_CHARGE_SOC) {
 
 		if ((soc < STOP_CHARGE_SOC && soc_full == 0) || (soc >= STOP_CHARGE_SOC && soc_full == 1))
 		{
@@ -3874,7 +4006,7 @@ static void nopmi_batt_capacity_check_work(struct work_struct *work)
                         }
 			pr_err("start batt_full_capacity start recharge\n");
 		}
-		batt_full_capacity_pre = nopmi_chg->batt_full_capacity;
+		batt_full_capacity_pre = nopmi_chg->batt_full_capacity_soc;
 		if (nopmi_chg->batt_psy == NULL) {
 			nopmi_chg->batt_psy = power_supply_get_by_name("battery");
 		}
@@ -3882,13 +4014,13 @@ static void nopmi_batt_capacity_check_work(struct work_struct *work)
 			power_supply_changed(nopmi_chg->batt_psy);
 		}
 	} else {
-		if(nopmi_chg->batt_full_capacity != STOP_CHARGE_SOC && batt_full_capacity_pre == STOP_CHARGE_SOC) {
+		if(nopmi_chg->batt_full_capacity_soc != STOP_CHARGE_SOC && batt_full_capacity_pre == STOP_CHARGE_SOC) {
 			soc_full = 0;
-			batt_full_capacity_pre = nopmi_chg->batt_full_capacity;
+			batt_full_capacity_pre = nopmi_chg->batt_full_capacity_soc;
 			pval.intval = 1;
                         rc = power_supply_set_property(nopmi_chg->usb_psy, POWER_SUPPLY_PROP_ONLINE, &pval);
 			rc = nopmi_set_prop_input_suspend(nopmi_chg, 0);
-			pr_err("batt_full_capacity change,start charge batt_full_capacity =  %d ,batt_full_capacity_pre = %d\n", nopmi_chg->batt_full_capacity, batt_full_capacity_pre);
+			pr_err("batt_full_capacity change,start charge batt_full_capacity =  %d ,batt_full_capacity_pre = %d\n", nopmi_chg->batt_full_capacity_soc, batt_full_capacity_pre);
 			if (rc < 0) {
 				pr_err("Couldn't able charge\n");
 			}

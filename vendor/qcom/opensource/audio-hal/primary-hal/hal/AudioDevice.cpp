@@ -2038,6 +2038,21 @@ int AudioDevice::SetParameters(const char *kvpairs) {
         }
     }
 
+//add by zhanandong for cmc
+    ret = str_parms_get_str(parms, "g_call_forwarding_enable", value, sizeof(value));
+    if (ret >= 0) {
+        call_forwarding_state = (strcmp(value, "true")) ? false : true;
+        if (call_forwarding_state) {
+            voice_->VoiceSetParameters("device_mute=true;direction=rx");
+            SetMicMute(true);
+        } else {
+             voice_->VoiceSetParameters("device_mute=false;direction=rx");
+            SetMicMute(false);
+        }
+        str_parms_del(parms, "g_call_forwarding_enable");
+    }
+//add end
+
 exit:
     if (parms)
         str_parms_destroy(parms);

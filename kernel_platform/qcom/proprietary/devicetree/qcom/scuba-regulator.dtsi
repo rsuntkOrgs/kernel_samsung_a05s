@@ -232,6 +232,16 @@
 		};
 	};
 
+	rpm-regulator-ldoa9 {
+		status = "okay";
+		L9A: pm2250_l9: regulator-l9 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2000000>;
+			qcom,init-voltage = <1800000>;
+			status = "okay";
+		};
+	};
+
 	rpm-regulator-ldoa10 {
 		status = "okay";
 		L10A: pm2250_l10: regulator-l10 {
@@ -358,6 +368,36 @@
 			regulator-min-microvolt = <2850000>;
 			regulator-max-microvolt = <3400000>;
 			qcom,init-voltage = <2850000>;
+			status = "okay";
+		};
+	};
+
+	rpm-regulator-ldoa23 {
+		status = "okay";
+		L23A: pm2250_l23: regulator-l23 {
+			regulator-min-microvolt = <3200000>;
+			regulator-max-microvolt = <3400000>;
+			qcom,init-voltage = <3200000>;
+			status = "okay";
+		};
+	};
+
+	rpm-regulator-ldoa25 {
+		status = "okay";
+		L25A: pm2250_l25: regulator-l25 {
+			regulator-min-microvolt = <1704000>;
+			regulator-max-microvolt = <1904000>;
+			qcom,init-voltage = <1704000>;
+			status = "okay";
+		};
+	};
+
+	rpm-regulator-ldoa26 {
+		status = "okay";
+		L26A: pm2250_l26: regulator-l26 {
+			regulator-min-microvolt = <1152000>;
+			regulator-max-microvolt = <1384000>;
+			qcom,init-voltage = <1152000>;
 			status = "okay";
 		};
 	};

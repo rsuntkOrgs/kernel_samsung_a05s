@@ -207,6 +207,7 @@ struct usbpd_pm {
 	ktime_t entry_bq_cv_time;
     struct delayed_work pm_work;
     struct delayed_work dis_fcc_work;
+    struct delayed_work pd_vote_monitor_work;
 
     struct notifier_block nb;
 
@@ -223,6 +224,8 @@ struct usbpd_pm {
 	struct device *dev;
     int shutdown_flag;
     int pd_cv;
+    int battery_cycle;
+    int debug_battery_cycle;
     bool isln8000flag;
 	bool issc8541flag;
 

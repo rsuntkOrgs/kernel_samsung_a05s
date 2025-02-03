@@ -57,22 +57,26 @@
 #endif
 
 #define ATTACHEDSRC   7
-#define FLOAT_VOLTAGE_DEFAULT_UPM6918 4423
-#define FLOAT_VOLTAGE_STEP1_UPM6918   4350
-#define FLOAT_VOLTAGE_STEP2_UPM6918   4330
-#define FLOAT_VOLTAGE_STEP3_UPM6918   4310
-#define FLOAT_VOLTAGE_STEP4_UPM6918   4290
+#define FLOAT_VOLTAGE_DEFAULT_UPM6918 4350
+#define FLOAT_VOLTAGE_STEP1_UPM6918   4330
+#define FLOAT_VOLTAGE_STEP2_UPM6918   4310
+#define FLOAT_VOLTAGE_STEP3_UPM6918   4290
+#define FLOAT_VOLTAGE_STEP4_UPM6918   4240
 
-#define FLOAT_VOLTAGE_DEFAULT_UPM6918_PD_AFC_VAL 0x12
-#define FLOAT_VOLTAGE_DEFAULT_UPM6918_VAL 0x11
-#define FLOAT_VOLTAGE_STEP1_UPM6918_VAL 0x10
-#define FLOAT_VOLTAGE_STEP2_UPM6918_VAL 0xF
-#define FLOAT_VOLTAGE_STEP3_UPM6918_VAL 0xE
-#define FLOAT_VOLTAGE_STEP4_UPM6918_VAL 0xD
+#define FLOAT_VOLTAGE_DEFAULT_UPM6918_PD_AFC_VAL 0x11
+#define FLOAT_VOLTAGE_DEFAULT_UPM6918_VAL 0x10
+
+#define FLOAT_VOLTAGE_STEP1_UPM6918_VAL 0xF
+#define FLOAT_VOLTAGE_STEP2_UPM6918_VAL 0xE
+#define FLOAT_VOLTAGE_STEP3_UPM6918_VAL 0xD
+#define FLOAT_VOLTAGE_STEP4_UPM6918_VAL 0xC
 
 
 extern int sp2130_set_adc(bool val);
 extern int sm5602_set_shutdown(int val);
+extern int sm5602_CV;
+static int upm6918_ic_flag;
+
 enum {
 	PN_UPM6918D,
 };
@@ -168,6 +172,8 @@ struct upm6918 {
     	int unknown_type_recheck_cnt;
 };
 
+struct upm6918 *g_upm;
+
 #ifndef MTK_CHARGER
 enum {
 	CHARGER_UNKNOWN,
@@ -186,6 +192,7 @@ static const unsigned int upm6918_extcon_cable[] = {
 
 static bool vbus_on = false;
 
+int upm6918_set_acovp_threshold(struct upm6918 *upm, int volt);
 int upm6918_set_iio_channel(struct upm6918 *upm, enum upm6918_iio_type type, int channel, int val);
 
 static int __upm6918_read_reg(struct upm6918 *upm, u8 reg, u8 *data)
@@ -395,7 +402,28 @@ int upm6918_set_chargevolt(struct upm6918 *upm, int volt)
 	if (volt < REG04_VREG_BASE)
 		volt = REG04_VREG_BASE;
 
-	val = (volt - REG04_VREG_BASE) / REG04_VREG_LSB;
+	if (volt < REG04_VREG_BASE)
+		volt = REG04_VREG_BASE;
+
+    if (volt == 4400) {
+		val = 17;
+	} else if (volt == 4350) {
+		val = 16;
+	} else if (volt == 4330) {
+		val = 15;
+	} else if (volt == 4310) {
+		val = 14;
+	} else if (volt == 4280) {
+		val = 13;
+	} else if (volt == 4240) {
+		val = 12;
+	} else{
+		val = (volt - REG04_VREG_BASE) / REG04_VREG_LSB;
+	}
+	
+
+	pr_err("set_chargevolt = %d\n", volt);
+
 	return upm6918_update_bits(upm, UPM6918_REG_04, REG04_VREG_MASK,
 				   val << REG04_VREG_SHIFT);
 }
@@ -515,6 +543,36 @@ int upm6918_exit_hiz_mode(struct upm6918 *upm)
 
 }
 EXPORT_SYMBOL_GPL(upm6918_exit_hiz_mode);
+
+void tcpc_upm6918_set_chargecurrent(void)
+{
+  	if(upm6918_ic_flag)
+          return;
+	upm6918_set_input_current_limit(g_upm,100);
+}
+EXPORT_SYMBOL_GPL(tcpc_upm6918_set_chargecurrent);
+
+void tcpc_upm6918_exit_hiz_mode(void)
+{
+  	if(upm6918_ic_flag)
+          return;
+	pr_err("tcpc exit hiz!!!\n");
+	upm6918_set_input_volt_limit(g_upm,4600);
+	upm6918_set_acovp_threshold(g_upm,14000);
+	//upm6918_exit_hiz_mode(g_upm);
+}
+EXPORT_SYMBOL_GPL(tcpc_upm6918_exit_hiz_mode);
+
+
+void tcpc_upm6918_enter_hiz_mode(void)
+{
+  	if(upm6918_ic_flag)
+          return;
+	upm6918_set_input_volt_limit(g_upm,6000);
+	pr_err("tcpc enter hiz!!!\n");
+	//upm6918_enter_hiz_mode(g_upm);
+}
+EXPORT_SYMBOL_GPL(tcpc_upm6918_enter_hiz_mode);
 
 int upm6918_enable_term(struct upm6918 *upm, bool enable)
 {
@@ -865,7 +923,10 @@ static int upm6918_get_charger_type(struct upm6918 *upm, int *type)
 	pr_err("reg08: 0x%02x\n", reg_val);
 
 	if(vbus_stat == REG08_VBUS_TYPE_SDP && upm->unknown_type_recheck_cnt < 2) {
-		upm6918_request_dpdm(upm, true);
+		if(!upm->pr_flag)
+			upm6918_request_dpdm(upm, true);
+		else
+			goto charger_type;
 		msleep(5);
 		pr_err("xlog\n");
 		upm6918_force_dpdm(upm);
@@ -875,6 +936,7 @@ static int upm6918_get_charger_type(struct upm6918 *upm, int *type)
         	return ret;
 	}
 
+charger_type:
 	switch (vbus_stat) {
 	case REG08_VBUS_TYPE_NONE:
 		chg_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
@@ -1009,6 +1071,12 @@ static irqreturn_t upm6918_irq_handler(int irq, void *data)
 		{
 			upm6918_request_dpdm(upm, true);
 		}
+          	ret = upm6918_set_chargevolt(upm, 4400);
+		if (ret < 0) {
+			pr_err("failed to set chargevoltage\n");
+			return ret;
+		}
+		
 		vote(upm->usb_icl_votable, DCP_CHG_VOTER, false, 0);
 		vote(upm->usb_icl_votable, PD_CHG_VOTER, false, 0);
 		vote(upm->fcc_votable, DCP_CHG_VOTER, false, 0);
@@ -1114,7 +1182,7 @@ static int upm6918_init_device(struct upm6918 *upm)
 	if (ret)
 		pr_err("Failed to set acovp threshold, ret = %d\n", ret);
 
-	ret = upm6918_set_chargevolt(upm, upm->platform_data->usb.vreg);
+	ret = upm6918_set_chargevolt(upm, 4400);
 	if (ret)
 		pr_err("Failed to set batteyr vreg, ret = %d\n", ret);
 
@@ -2388,6 +2456,11 @@ static int fv_vote_callback(struct votable *votable, void *data,
 	int rc = 0, ret = 0;
 	u8 val;
 
+	if(fv_mv != 4200) //high temperature
+		fv_mv = sm5602_CV;
+	else
+		pr_err("high temperature,fv = %d\n",fv_mv);
+  
 	pr_err("fv_vote_callback start");
 	if (fv_mv < 0) {
 		pr_err("fv_mv: %d < 0, ERROR!\n", fv_mv);
@@ -2426,7 +2499,8 @@ static int fv_vote_callback(struct votable *votable, void *data,
 	} else if(fv_mv == FLOAT_VOLTAGE_STEP4_UPM6918) {
 		upm6918_update_bits(upm, UPM6918_REG_04, REG04_VREG_MASK,
 				   FLOAT_VOLTAGE_STEP4_UPM6918_VAL << REG04_VREG_SHIFT);
-	} else {
+	} else if(fv_mv == 4200)//high temperature
+	{
 		rc = upm6918_set_chargevolt(upm, fv_mv);
 		if (rc < 0) {
 			pr_err("failed to set chargevoltage\n");
@@ -2510,9 +2584,11 @@ static int upm6918_charger_probe(
 	ret = upm6918_detect_device(upm);
 	if (ret) {
 		pr_err("No upm6918 device found!\n");
+          	upm6918_ic_flag = 1;
 		ret = -ENODEV;
 		goto err_free;
 	}
+  	upm6918_ic_flag = 0;
 	if (!upm->tcpc) {
 		upm->tcpc = tcpc_dev_get_by_name("type_c_port0");
 		if (!upm->tcpc) {
@@ -2555,6 +2631,7 @@ static int upm6918_charger_probe(
 	INIT_DELAYED_WORK(&upm->disable_afc_dwork, upm6918_disable_afc_dwork);
 	INIT_DELAYED_WORK(&upm->disable_pdo_dwork, upm6918_disable_pdo_dwork);
 	upm6918_extcon_init(upm);
+	g_upm = upm;
 
 	ret = upm6918_init_device(upm);
 	if (ret) {
@@ -2660,7 +2737,7 @@ err_free:
 	mutex_destroy(&upm->regulator_lock);
 	pr_err("upm6918 probe fail !\n");
 	//devm_kfree(&pdev->dev,upm6918);
-	return ret;
+	return 0;
 }
 
 static int upm6918_charger_remove(struct i2c_client *client)
@@ -2678,6 +2755,9 @@ static void upm6918_charger_shutdown(struct i2c_client *client)
 {
 	struct upm6918 *upm = i2c_get_clientdata(client);
 	int ret;
+  
+  	if(upm6918_ic_flag)
+        	return ;
 
 	if(!upm) {
 		pr_err("i2c_get_clientdata error\n");

@@ -359,6 +359,8 @@ static const struct upm6720_iio_channels upm6720_iio_psy_channels[] = {
 //	UPM6720_CHAN_ENERGY("up_enable_otg", PSY_IIO_SP2130_ENABLE_OTG)
 };
 
+static int upm6720_ic_flag;
+
 #define BAT_OVP_FAULT_SHIFT         0
 #define BAT_OCP_FAULT_SHIFT         1
 #define BUS_OVP_FAULT_SHIFT         2
@@ -2594,9 +2596,10 @@ static int upm6720_charger_probe(struct i2c_client *client,
     ret = upm6720_detect_device(upm);
     if (ret) {
         pr_err("No upm6720 device found!\n");
+		upm6720_ic_flag = 1;
         goto err_1;
     }
-
+	upm6720_ic_flag = 0;
     i2c_set_clientdata(client, upm);
     //upm6720_create_device_node(&(client->dev));
 
@@ -2643,8 +2646,8 @@ static int upm6720_charger_probe(struct i2c_client *client,
 	
 	INIT_DELAYED_WORK(&upm->monitor_work, upm6720_monitor_work);
 	//schedule_delayed_work(&upm->monitor_work, msecs_to_jiffies(3*1000));
-
-	upm6720_init_iio_psy(upm);		
+		
+  	upm6720_init_iio_psy(upm);
 	g_upm = upm;
 
     pr_err("upm6720 probe successfully, Part Num:%d\n!",
@@ -2660,7 +2663,7 @@ err_1:
     mutex_destroy(&upm->irq_complete);
     pr_err("upm6720 probe fail\n");
     devm_kfree(&client->dev, upm);
-    return ret;
+    return 0;
 }
 
 static inline bool is_device_suspended(struct upm6720 *upm)
@@ -2672,6 +2675,9 @@ static int upm6720_suspend(struct device *dev)
 {
     struct i2c_client *client = to_i2c_client(dev);
     struct upm6720 *upm = i2c_get_clientdata(client);
+
+	if(upm6720_ic_flag)
+		return 0;
 
     mutex_lock(&upm->irq_complete);
     upm->resume_completed = false;
@@ -2685,6 +2691,9 @@ static int upm6720_suspend_noirq(struct device *dev)
 {
     struct i2c_client *client = to_i2c_client(dev);
     struct upm6720 *upm = i2c_get_clientdata(client);
+  
+    if(upm6720_ic_flag)
+	return 0;
 
     if (upm->irq_waiting) {
         pr_err_ratelimited("Aborting suspend, an interrupt was detected while suspending\n");
@@ -2697,6 +2706,9 @@ static int upm6720_resume(struct device *dev)
 {
     struct i2c_client *client = to_i2c_client(dev);
     struct upm6720 *upm = i2c_get_clientdata(client);
+
+	if(upm6720_ic_flag)
+		return 0;
 
     mutex_lock(&upm->irq_complete);
     upm->resume_completed = true;
@@ -2736,6 +2748,9 @@ static int upm6720_charger_remove(struct i2c_client *client)
 static void upm6720_charger_shutdown(struct i2c_client *client)
 {
     struct upm6720 *upm = i2c_get_clientdata(client);
+  
+    if(upm6720_ic_flag)
+    	return ;
 
     upm6720_enable_adc(upm, false);
     mutex_destroy(&upm->i2c_rw_lock);

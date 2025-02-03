@@ -2,7 +2,7 @@
 /*
  * Copyright (c) 2015, The Linux Foundation. All rights reserved.
  * Copyright (c) 2019, 2020, Linaro Ltd.
- * Copyright (c) 2021-2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -19,6 +19,7 @@
 #include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/thermal.h>
+#include <linux/thermal_minidump.h>
 #include "tsens.h"
 #include "thermal_zone_internal.h"
 
@@ -1056,7 +1057,7 @@ static const struct thermal_zone_of_device_ops tsens_of_ops = {
 };
 
 static int tsens_register_irq(struct tsens_priv *priv, char *irqname,
-			      irq_handler_t thread_fn)
+			      irq_handler_t thread_fn, int *irq_num)
 {
 	struct platform_device *pdev;
 	int ret, irq;
@@ -1066,6 +1067,7 @@ static int tsens_register_irq(struct tsens_priv *priv, char *irqname,
 		return -ENODEV;
 
 	irq = platform_get_irq_byname(pdev, irqname);
+	*irq_num = irq;
 	if (irq < 0) {
 		ret = irq;
 		/* For old DTs with no IRQ defined */
@@ -1138,13 +1140,15 @@ static int tsens_register(struct tsens_priv *priv)
 				   tsens_mC_to_hw(priv->sensor, 0));
 	}
 
-	ret = tsens_register_irq(priv, "uplow", tsens_irq_thread);
+	ret = tsens_register_irq(priv, "uplow", tsens_irq_thread,
+					&priv->uplow_irq);
+
 	if (ret < 0)
 		return ret;
 
 	if (priv->feat->crit_int)
 		ret = tsens_register_irq(priv, "critical",
-					 tsens_critical_irq_thread);
+					 tsens_critical_irq_thread, &priv->crit_irq);
 
 	return ret;
 }
@@ -1220,6 +1224,10 @@ static int tsens_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
+
+	priv->tsens_md = thermal_minidump_register(np->name);
+	priv->tm_disable_on_suspend =
+				of_property_read_bool(np, "tm-disable-on-suspend");
 
 	return tsens_register(priv);
 }

@@ -167,13 +167,15 @@ struct nopmi_chg {
 	int hv_charger_status;
 	int batt_current_event;
 	int batt_misc_event;
-	int batt_full_capacity;
+	int batt_full_capacity_soc;
 	int battery_cycle;
 	int batt_charging_source;
 	int batt_current_ua_now;
 	int direct_charging_status;
 	int batt_charging_type;
 	int batt_store_mode;
+	int batt_soc_rechg;
+	char batt_full_capacity[32];
 	bool is_store_mode_stop_charge;
 #ifdef NOPMI_FULL_IN_ADVANCE
 	int batt_capacity_store;
@@ -194,6 +196,7 @@ struct nopmi_chg {
 	struct device_attribute attr_direct_charging_status;
 	struct device_attribute attr_charging_type;
 	struct device_attribute attr_store_mode;
+	struct device_attribute attr_batt_soc_rechg;
 	int pd_active;
 	int onlypd_active;
 	int in_verified;

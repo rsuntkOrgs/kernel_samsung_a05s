@@ -579,19 +579,19 @@ static void nopmi_chg_handle_jeita_current(struct nopmi_chg_jeita_st *nopmi_chg_
 			/*Both temp is normal and FFC is enabled, then improve FV*/
 			if(fast_charge_mode && !g_ffc_disable){
 				if(NOPMI_CHARGER_IC_MAXIM == nopmi_get_charger_ic_type()){
-					sw_jeita->cv = 4423; //for maxim chip
+					sw_jeita->cv = 4350; //for maxim chip
 				}else{
-					sw_jeita->cv = 4423; //for other pmic chips
+					sw_jeita->cv = 4350; //for other pmic chips
 				}
 				if(!pd_verified){
-					sw_jeita->cv = 4423; //for unverified pd
+					sw_jeita->cv = 4350; //for unverified pd
 				}
 			}
 	}
 	if(cp_charging_enabled) {
 		if(NOPMI_CHARGER_IC_MAXIM != nopmi_get_charger_ic_type()) {
 			pr_info("charge pump :sw_jeita->cv = 4608.\n");
-			sw_jeita->cv = 4423; //if charger pump working set sw_chip fv:4608
+			sw_jeita->cv = 4350; //if charger pump working set sw_chip fv:4608
 		}
 	}
 	if (nopmi_chg_jeita->battery_temp >= nopmi_chg_jeita->dt.temp_t4_plus_thres) {

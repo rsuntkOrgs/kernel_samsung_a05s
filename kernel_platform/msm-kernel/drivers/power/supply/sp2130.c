@@ -10,6 +10,8 @@
 bool sp2130_conf_en = false;
 struct sp2130 *g_sc;
 
+static int sp2130_ic_flag;
+
 bool get_sp2130_device_config(void)
 {
 	bool load_en;
@@ -1854,8 +1856,15 @@ static int sp2130_charger_probe(struct i2c_client *client,
 
 	if (ret) {
 		sc_err("No sp2130 device found!\n");
-		return -ENODEV;
+		sp2130_ic_flag = 1;
+		mutex_destroy(&sc->i2c_rw_lock);
+		mutex_destroy(&sc->data_lock);
+		mutex_destroy(&sc->charging_disable_lock);
+		mutex_destroy(&sc->irq_complete);
+		devm_kfree(&client->dev, sc);
+		return 0;
 	}
+	sp2130_ic_flag = 0;
 	sc_err("%s %d\n", __func__, __LINE__);
 
 	i2c_set_clientdata(client, sc);
@@ -1918,8 +1927,12 @@ static inline bool is_device_suspended(struct sp2130 *sc)
 
 static int sp2130_suspend(struct device *dev)
 {
+	
 	struct i2c_client *client = to_i2c_client(dev);
 	struct sp2130 *sc = i2c_get_clientdata(client);
+
+	if(sp2130_ic_flag)
+		return 0;
 
 	mutex_lock(&sc->irq_complete);
 	sc->resume_completed = false;
@@ -1935,6 +1948,9 @@ static int sp2130_suspend_noirq(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct sp2130 *sc = i2c_get_clientdata(client);
+  
+  	if(sp2130_ic_flag)
+		return 0;
 
 	if (sc->irq_waiting) {
 		pr_err_ratelimited("Aborting suspend, an interrupt was detected while suspending\n");
@@ -1948,6 +1964,8 @@ static int sp2130_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct sp2130 *sc = i2c_get_clientdata(client);
 
+	if(sp2130_ic_flag)
+		return 0;
 
 	mutex_lock(&sc->irq_complete);
 	sc->resume_completed = true;
@@ -1987,6 +2005,9 @@ static int sp2130_charger_remove(struct i2c_client *client)
 static void sp2130_charger_shutdown(struct i2c_client *client)
 {
 	struct sp2130 *sc = i2c_get_clientdata(client);
+  
+  	if(sp2130_ic_flag)
+            return ;
 
 	sp2130_enable_adc(sc, false);
 	sc->adc_status = 0;
